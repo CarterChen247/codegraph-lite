@@ -3265,44 +3265,23 @@ program
 /**
  * codegraph upgrade [version]
  *
- * Self-update, however CodeGraph was installed (bundle via install.sh/.ps1,
- * npm-global, npx, or a source checkout). See ../upgrade for the detection and
- * per-method upgrade logic.
+ * Privacy hardening (#5): this build never downloads or installs anything.
+ * It prints how to update the source checkout instead (see ../upgrade). The
+ * upstream arguments and options are still accepted, so scripts don't break.
  */
 program
   .command('upgrade [version]')
-  .description('Update CodeGraph to the latest release (or a specific version)')
-  .option('--check', 'Check whether an update is available without installing')
-  .option('-f, --force', 'Reinstall even if already on the target version')
-  .action(async (versionArg: string | undefined, options: { check?: boolean; force?: boolean }) => {
+  .description('Show how to update this source build (downloads nothing)')
+  .option('--check', 'Accepted for compatibility; prints the same instructions')
+  .option('-f, --force', 'Accepted for compatibility; prints the same instructions')
+  .action(async () => {
     const up = await import('../upgrade');
     const method = up.detectInstallMethod({
       filename: __filename,
       platform: process.platform,
       cwd: process.cwd(),
     });
-    const pin = versionArg || process.env.CODEGRAPH_VERSION || undefined;
-    const code = await up.runUpgrade(
-      { version: pin, check: options.check, force: options.force },
-      {
-        currentVersion: packageJson.version,
-        method,
-        resolveLatest: () => up.resolveLatestVersion(),
-        run: up.defaultRun,
-        capture: up.defaultCapture,
-        hasCommand: up.hasCommand,
-        wirePromptHook: up.defaultWirePromptHook,
-        log: (m: string) => console.log(m),
-        warn: (m: string) => warn(m),
-        error: (m: string) => error(m),
-        platform: process.platform,
-        offerBetaSignup: async () => {
-          const { maybeOfferBetaSignup } = await import('../installer/beta-signup');
-          await maybeOfferBetaSignup({ source: 'cli-upgrade' });
-        },
-      }
-    );
-    process.exit(code);
+    console.log(`\n${up.sourceUpgradeInstructions(method)}\n`);
   });
 
 /**
