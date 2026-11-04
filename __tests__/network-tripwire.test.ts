@@ -24,7 +24,6 @@ const SPAWN_RECORDER = path.resolve(__dirname, 'fixtures/record-detached-spawns.
  * code, not just disabled.
  */
 const OPT_OUTS: Record<string, string> = {
-  CODEGRAPH_TELEMETRY: '0', // removed by #3 (telemetry)
   CODEGRAPH_NO_UPDATE_CHECK: '1', // removed by #4 (update check)
 };
 
@@ -161,6 +160,15 @@ describe('network tripwire', () => {
     expect(recordedAttempts()).toEqual([]);
   });
 
+  it('codegraph telemetry reports that telemetry is removed, in every form', () => {
+    for (const args of [['telemetry'], ['telemetry', 'status'], ['telemetry', 'on'], ['telemetry', 'off']]) {
+      const { status, output } = runCli(args);
+      expect({ args, status }).toEqual({ args, status: 0 });
+      expect(output).toMatch(/Telemetry is removed in this build/);
+    }
+    expect(recordedAttempts()).toEqual([]);
+  });
+
   describe.each([
     ['in-process', { CODEGRAPH_NO_DAEMON: '1' }],
     ['daemon', { CODEGRAPH_DAEMON_IDLE_TIMEOUT_MS: '1000' }],
@@ -213,5 +221,13 @@ describe('network tripwire', () => {
       await waitForDetachedExit();
       expect(recordedAttempts()).toEqual([]);
     });
+  });
+
+  // Last, after every command above (and the daemon) has run in this HOME.
+  it('leaves no telemetry identity or queue behind', async () => {
+    await waitForDetachedExit();
+    const stateDir = path.join(home, '.codegraph');
+    const telemetryFiles = fs.existsSync(stateDir) ? fs.readdirSync(stateDir).filter((name) => name.startsWith('telemetry')) : [];
+    expect(telemetryFiles).toEqual([]);
   });
 });
