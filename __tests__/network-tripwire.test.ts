@@ -164,6 +164,17 @@ describe('network tripwire', () => {
     expect(recordedAttempts()).toEqual([]);
   });
 
+  it('codegraph upgrade prints the source-build instructions and downloads nothing', () => {
+    for (const args of [['upgrade'], ['upgrade', '--check'], ['upgrade', '9.9.9', '--force']]) {
+      const { status, ms, output } = runCli(args);
+      expect({ args, status }).toEqual({ args, status: 0 });
+      expect(ms, `codegraph ${args.join(' ')} took ${ms} ms`).toBeLessThan(COMMAND_BUDGET_MS);
+      expect(output).toMatch(/downloads nothing/);
+      expect(output).toMatch(/git pull\n\s+npm ci\n\s+npm run build/);
+    }
+    expect(recordedAttempts()).toEqual([]);
+  });
+
   describe.each([
     ['in-process', { CODEGRAPH_NO_DAEMON: '1' }],
     ['daemon', { CODEGRAPH_DAEMON_IDLE_TIMEOUT_MS: '1000' }],
