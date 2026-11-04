@@ -3,11 +3,12 @@
  * edition).
  *
  * Before this feature, `codegraph uninstall` removed agent configs only:
- * a user with both a bundle install and an npm global install (the shadow
- * scenario) still had a working `codegraph` on PATH afterward. The planner
- * must find EVERY install present on the machine — not just the one the
- * running binary belongs to — and the executor must remove them all, with
- * the Windows locked-exe rename dance instead of a hard failure.
+ * a user with a bundle install still had a working `codegraph` on PATH
+ * afterward. The planner must find EVERY bundle install present on the
+ * machine — not just the one the running binary belongs to — and the
+ * executor must remove them all, with the Windows locked-exe rename dance
+ * instead of a hard failure. This build never asks npm about, or runs
+ * `npm uninstall -g` against, the official package (privacy hardening, #6).
  */
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
@@ -18,7 +19,6 @@ import {
   type BinaryRemovalPlan,
   type RemoveBinaryDeps,
 } from '../src/upgrade/remove-binary';
-import { NPM_PACKAGE, npmInvocation } from '../src/upgrade';
 
 const HOME = '/home/u';
 const STATE = `${HOME}/.codegraph`;
@@ -34,7 +34,6 @@ function probes(over: Partial<RemoveBinaryProbes> & { present?: Set<string>; lin
     homedir: HOME,
     exists: (p) => present.has(p) || links.has(p),
     readlink: (p) => links.get(p) ?? null,
-    capture: () => null, // no npm unless a test injects one
     ...over,
   };
 }
@@ -62,7 +61,6 @@ describe('planBinaryRemoval', () => {
     expect(plan.paths).toContain(`${HOME}/.local/bin/codegraph`);
     // The state dir (telemetry choice, daemon records) must survive.
     expect(plan.paths).not.toContain(STATE);
-    expect(plan.npmGlobal).toBe(false);
     expect(plan.sourceRoot).toBeNull();
   });
 
@@ -78,27 +76,13 @@ describe('planBinaryRemoval', () => {
     expect(plan.paths).not.toContain(`${dir}/versions`); // covered by the whole dir
   });
 
-  it('npm global install is found by asking npm, even when running from a bundle (the shadow case)', () => {
-    const npmRoot = '/usr/local/lib/node_modules';
+  it('an npm global package is never planned: this build leaves npm installs to npm', () => {
     const present = bundlePresent();
-    present.add(`${npmRoot}/${NPM_PACKAGE}`);
-    const plan = planBinaryRemoval(probes({
-      present,
-      capture: (cmd, args) =>
-        cmd === 'npm' && args.join(' ') === 'root -g' ? { code: 0, stdout: `${npmRoot}\n` } : null,
-    }));
-    expect(plan.npmGlobal).toBe(true);
-    expect(plan.npmRoot).toBe(npmRoot);
-    expect(plan.paths).toContain(`${STATE}/versions`); // both installs planned
-    expect(plan.summary.some((s) => s.includes(NPM_PACKAGE))).toBe(true);
-  });
-
-  it('npm not installed / no global package → npmGlobal false', () => {
-    const plan = planBinaryRemoval(probes({
-      present: bundlePresent(),
-      capture: () => ({ code: 0, stdout: '/usr/local/lib/node_modules\n' }), // root exists, package doesn't
-    }));
-    expect(plan.npmGlobal).toBe(false);
+    present.add('/usr/local/lib/node_modules/@colbymchenry/codegraph');
+    const plan = planBinaryRemoval(probes({ present }));
+    expect(plan.paths).toContain(`${STATE}/versions`);
+    expect(plan.paths.some((p) => p.includes('node_modules'))).toBe(false);
+    expect(plan.summary.some((s) => /npm/.test(s))).toBe(false);
   });
 
   it('a source checkout is reported and never listed for deletion', () => {
@@ -137,7 +121,6 @@ describe('planBinaryRemoval', () => {
   it('nothing installed → empty plan', () => {
     const plan = planBinaryRemoval(probes({ filename: '/somewhere/odd/codegraph.js' }));
     expect(plan.paths).toHaveLength(0);
-    expect(plan.npmGlobal).toBe(false);
     expect(plan.summary).toHaveLength(0);
   });
 });
@@ -154,7 +137,6 @@ describe('executeBinaryRemoval', () => {
         calls.push(`rm ${p}`);
       },
       rename: (from, to) => calls.push(`mv ${from} ${to}`),
-      run: (cmd, args) => { calls.push(`run ${cmd} ${args.join(' ')}`); return 0; },
       calls,
       ...over,
     };
@@ -162,29 +144,17 @@ describe('executeBinaryRemoval', () => {
 
   const plan = (over: Partial<BinaryRemovalPlan> = {}): BinaryRemovalPlan => ({
     paths: [],
-    npmGlobal: false,
-    npmRoot: null,
     sourceRoot: null,
     summary: [],
     ...over,
   });
 
-  it('removes planned paths and runs npm uninstall -g', () => {
+  it('removes planned paths, and nothing else', () => {
     const d = deps({});
-    const result = executeBinaryRemoval(
-      plan({ paths: [`${STATE}/versions`, `${STATE}/current`], npmGlobal: true, npmRoot: '/usr/local/lib/node_modules' }),
-      d,
-    );
+    const result = executeBinaryRemoval(plan({ paths: [`${STATE}/versions`, `${STATE}/current`] }), d);
     expect(result.removed).toEqual([`${STATE}/versions`, `${STATE}/current`]);
-    expect(result.npm).toBe('removed');
-    expect(d.calls).toContain(`run npm uninstall -g ${NPM_PACKAGE}`);
+    expect(d.calls).toEqual([`rm ${STATE}/versions`, `rm ${STATE}/current`]);
     expect(result.leftovers).toHaveLength(0);
-  });
-
-  it('npm failure is reported, not thrown', () => {
-    const d = deps({ run: () => 1 });
-    const result = executeBinaryRemoval(plan({ npmGlobal: true }), d);
-    expect(result.npm).toBe('failed');
   });
 
   it('windows: a locked exe inside the tree is renamed aside, then the tree deletes', () => {
@@ -212,17 +182,5 @@ describe('executeBinaryRemoval', () => {
     expect(result.removed).toHaveLength(0);
     expect(result.leftovers).toEqual(['/']);
     expect(d.calls).toHaveLength(0);
-  });
-});
-
-describe('npmInvocation', () => {
-  it('unix: plain npm', () => {
-    expect(npmInvocation('linux', ['root', '-g'])).toEqual({ cmd: 'npm', args: ['root', '-g'] });
-  });
-  it('windows: routed through cmd.exe (npm is a .cmd — direct spawn EINVALs on modern Node)', () => {
-    const inv = npmInvocation('win32', ['uninstall', '-g', NPM_PACKAGE]);
-    expect(inv.cmd).toBe('cmd.exe');
-    expect(inv.args.slice(0, 3)).toEqual(['/d', '/s', '/c']);
-    expect(inv.args[3]).toBe(`npm uninstall -g ${NPM_PACKAGE}`);
   });
 });

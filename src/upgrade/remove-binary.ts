@@ -11,8 +11,10 @@
  * working `codegraph` on PATH.
  *
  * This module makes `codegraph uninstall` complete: PLAN every binary
- * install present on the machine (bundle layout(s), the npm global package,
- * the bin-dir shim), then EXECUTE the removals. Split planner/executor with
+ * install present on the machine (bundle layout(s), the bin-dir shim), then
+ * EXECUTE the removals. Privacy hardening (#6): this build never asks npm about,
+ * or runs `npm uninstall -g` against, the official npm package — a user who
+ * installed it removes it with npm themselves. Split planner/executor with
  * injected side effects, same convention as the upgrade orchestrator.
  *
  * Safety rules:
@@ -37,8 +39,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { spawnSync } from 'child_process';
-import { detectInstallMethod, npmInvocation, NPM_PACKAGE } from './index';
+import { detectInstallMethod } from './index';
 
 // ---------------------------------------------------------------------------
 // Planner (pure — every probe injected)
@@ -54,21 +55,11 @@ export interface RemoveBinaryProbes {
   exists: (p: string) => boolean;
   /** Symlink target (raw link text), or null when not a symlink / unreadable. */
   readlink: (p: string) => string | null;
-  /** Run a command capturing stdout; null = spawn failed. */
-  capture: (cmd: string, args: string[]) => { code: number; stdout: string } | null;
 }
 
 export interface BinaryRemovalPlan {
   /** Filesystem paths to delete (bundle dirs / artifacts, shim links). */
   paths: string[];
-  /** The npm global package is installed and should be `npm uninstall -g`ed. */
-  npmGlobal: boolean;
-  /**
-   * npm's global node_modules root (for the Windows locked-exe dance — the
-   * vendored node.exe lives in the SIBLING per-platform package, so the
-   * whole root is the lock surface, not just the meta package's dir).
-   */
-  npmRoot: string | null;
   /** Running from a git checkout — surfaced to the user, never deleted. */
   sourceRoot: string | null;
   /** One human line per planned removal, for the confirm prompt. */
@@ -85,11 +76,6 @@ export function defaultProbes(filename: string): RemoveBinaryProbes {
     exists: fs.existsSync,
     readlink: (p) => {
       try { return fs.readlinkSync(p); } catch { return null; }
-    },
-    capture: (cmd, args) => {
-      const res = spawnSync(cmd, args, { encoding: 'utf8', windowsHide: true, timeout: 30_000 });
-      if (res.error || typeof res.status !== 'number') return null;
-      return { code: res.status, stdout: res.stdout ?? '' };
     },
   };
 }
@@ -135,8 +121,6 @@ export function planBinaryRemoval(p: RemoveBinaryProbes): BinaryRemovalPlan {
   const P = pathFor(p.platform);
   const plan: BinaryRemovalPlan = {
     paths: [],
-    npmGlobal: false,
-    npmRoot: null,
     sourceRoot: null,
     summary: [],
   };
@@ -190,20 +174,6 @@ export function planBinaryRemoval(p: RemoveBinaryProbes): BinaryRemovalPlan {
     }
   }
 
-  // --- npm global package -----------------------------------------------------
-  // Asking npm (not guessing prefixes) keeps this correct under nvm/fnm/volta.
-  // A LOCAL npm install (project dependency) is deliberately not offered.
-  const rootInv = npmInvocation(p.platform, ['root', '-g']);
-  const rootRes = p.capture(rootInv.cmd, rootInv.args);
-  if (rootRes && rootRes.code === 0) {
-    const pkgDir = P.join(rootRes.stdout.trim(), NPM_PACKAGE);
-    if (rootRes.stdout.trim() && p.exists(pkgDir)) {
-      plan.npmGlobal = true;
-      plan.npmRoot = rootRes.stdout.trim();
-      plan.summary.push(`npm global package (${NPM_PACKAGE})`);
-    }
-  }
-
   return plan;
 }
 
@@ -217,15 +187,12 @@ export interface RemoveBinaryDeps {
   execPath: string;
   rm: (p: string) => void;
   rename: (from: string, to: string) => void;
-  /** Run a command inheriting stdio; returns exit code (-1 = spawn failed). */
-  run: (cmd: string, args: string[]) => number;
 }
 
 export interface BinaryRemovalResult {
   removed: string[];
   /** Paths that could not be (fully) removed — surfaced with manual steps. */
   leftovers: string[];
-  npm: 'removed' | 'failed' | 'skipped';
 }
 
 export function defaultRemoveDeps(): RemoveBinaryDeps {
@@ -234,10 +201,6 @@ export function defaultRemoveDeps(): RemoveBinaryDeps {
     execPath: process.execPath,
     rm: (p) => fs.rmSync(p, { recursive: true, force: true }),
     rename: (from, to) => fs.renameSync(from, to),
-    run: (cmd, args) => {
-      const res = spawnSync(cmd, args, { stdio: 'inherit', windowsHide: true, timeout: 120_000 });
-      return typeof res.status === 'number' ? res.status : -1;
-    },
   };
 }
 
@@ -264,7 +227,7 @@ export function executeBinaryRemoval(
   plan: BinaryRemovalPlan,
   deps: RemoveBinaryDeps = defaultRemoveDeps(),
 ): BinaryRemovalResult {
-  const result: BinaryRemovalResult = { removed: [], leftovers: [], npm: 'skipped' };
+  const result: BinaryRemovalResult = { removed: [], leftovers: [] };
 
   const P = pathFor(deps.platform);
   for (const p of plan.paths) {
@@ -288,17 +251,6 @@ export function executeBinaryRemoval(
         result.leftovers.push(p);
       }
     }
-  }
-
-  if (plan.npmGlobal) {
-    // If we are RUNNING from the npm install on Windows, npm's delete will
-    // hit the same lock — move the exe aside first.
-    let moved: string | null = null;
-    if (plan.npmRoot) moved = moveLockedExeAside(plan.npmRoot, deps);
-    const inv = npmInvocation(deps.platform, ['uninstall', '-g', NPM_PACKAGE]);
-    const code = deps.run(inv.cmd, inv.args);
-    result.npm = code === 0 ? 'removed' : 'failed';
-    if (moved) result.leftovers.push(moved);
   }
 
   return result;

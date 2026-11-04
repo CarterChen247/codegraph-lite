@@ -10,14 +10,12 @@
  *
  *   - `sourceUpgradeInstructions` — what `codegraph upgrade` prints instead:
  *     how to update a source build of this fork (pull, `npm ci`, build).
- *   - install-method detection and `npmInvocation`, still used by the
+ *   - install-method detection, used by the upgrade command and the
  *     uninstaller's binary-removal step.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
-
-export const NPM_PACKAGE = '@colbymchenry/codegraph';
 
 // ---------------------------------------------------------------------------
 // Install-method detection (pure — fully unit-testable via injected probes)
@@ -201,25 +199,6 @@ function isNpmGlobalTree(
   const local = exists(P.join(bin, 'codegraph')) || exists(P.join(bin, 'codegraph.cmd'))
     || exists(P.join(owner, 'package.json'));
   return !local;
-}
-
-// ---------------------------------------------------------------------------
-// npm invocation (used by the uninstaller)
-// ---------------------------------------------------------------------------
-
-/**
- * How to invoke npm. On Windows npm is a .cmd batch file, which Node refuses
- * to spawn without a shell (EINVAL since the CVE-2024-27980 hardening) — a
- * direct `npm.cmd` spawn fails on every current Node, so route it through
- * cmd.exe, the same way the surface-refresh step invokes the .cmd launcher.
- * (Verified live on the Windows VM: `spawnSync('npm.cmd')` → EINVAL;
- * `cmd.exe /d /s /c npm …` → works.)
- */
-export function npmInvocation(platform: NodeJS.Platform, npmArgs: string[]): { cmd: string; args: string[] } {
-  if (platform === 'win32') {
-    return { cmd: 'cmd.exe', args: ['/d', '/s', '/c', ['npm', ...npmArgs].join(' ')] };
-  }
-  return { cmd: 'npm', args: npmArgs };
 }
 
 // ---------------------------------------------------------------------------
