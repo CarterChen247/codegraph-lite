@@ -15,7 +15,6 @@
  * `--print-config` CLI flags.
  */
 
-import { execSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import {
@@ -32,7 +31,6 @@ import { watchDisabledReason } from '../sync/watch-policy';
 import { isGitRepo, isSyncHookInstalled, installGitSyncHook } from '../sync/git-hooks';
 import { getCodeGraphDir } from '../directory';
 import { getTelemetry, TELEMETRY_DOCS } from '../telemetry';
-import { maybeOfferBetaSignup } from './beta-signup';
 
 // Backwards-compat: keep these named exports — downstream code may
 // import them. The shim in `config-writer.ts` continues to re-export
@@ -104,33 +102,9 @@ export async function runInstallerWithOptions(opts: RunInstallerOptions): Promis
     return;
   }
 
-  // Step 2: install the codegraph npm package on PATH (always offered;
-  // matches existing behavior). Skipped when --yes (assume present).
-  if (!useDefaults) {
-    const shouldInstallGlobally = await clack.confirm({
-      message: 'Install the codegraph CLI on your PATH? (Required so agents can launch the MCP server)',
-      initialValue: true,
-    });
-    if (clack.isCancel(shouldInstallGlobally)) {
-      clack.cancel('Installation cancelled.');
-      process.exit(0);
-    }
-    if (shouldInstallGlobally) {
-      const s = clack.spinner();
-      s.start('Installing codegraph CLI...');
-      try {
-        // Generous bound (slow networks / cold npm cache) — but bounded, so a
-        // wedged npm can't hang the interactive installer forever (#1139).
-        execSync('npm install -g @colbymchenry/codegraph', { stdio: 'pipe', windowsHide: true, timeout: 120_000 });
-        s.stop('Installed codegraph CLI on PATH');
-      } catch {
-        s.stop('Could not install (permission denied)');
-        clack.log.warn('Try: sudo npm install -g @colbymchenry/codegraph');
-      }
-    } else {
-      clack.log.info('Skipped CLI install — agents will not be able to launch the MCP server without it');
-    }
-  }
+  // Step 2 (upstream: offer `npm install -g @colbymchenry/codegraph`) is
+  // removed in this build (privacy hardening, #6): the official package would
+  // shadow the user's `npm link` build on PATH. The CLI is the source build.
 
   // Step 3: where the per-agent config files should land.
   let location: Location;
@@ -271,16 +245,8 @@ export async function runInstallerWithOptions(opts: RunInstallerOptions): Promis
     });
   }
 
-  // Step 5½: CodeGraph Pro beta opt-in — the same waitlist as the
-  // getcodegraph.com homepage form, offered once per machine at the end of a
-  // successful install (and after `codegraph upgrade` — the shared gate in
-  // maybeOfferBetaSignup means whichever asks first is the ONLY ask ever).
-  // Strictly opt-in (user answers yes AND types an email), never shown under
-  // --yes, and any yes/no answer is stored so nothing re-asks. Cancel or a
-  // failed submit stores nothing, so a later install/upgrade may offer again.
-  if (!useDefaults && installedIds.length > 0) {
-    await maybeOfferBetaSignup({ source: 'cli-install' });
-  }
+  // Step 5½ (upstream: the CodeGraph Pro beta waitlist, which sends an email
+  // address to getcodegraph.com) is removed in this build (privacy hardening, #6).
 
   // Step 6: install wires up agents only — it deliberately does NOT index.
   // Building the per-project graph is the user's explicit `codegraph init`
@@ -568,20 +534,15 @@ export async function runUninstaller(opts: RunUninstallerOptions): Promise<void>
       if (removeBinaries) {
         const result = executeBinaryRemoval(plan);
         for (const p of result.removed) clack.log.success(`Removed ${tildify(p)}`);
-        if (result.npm === 'removed') {
-          clack.log.success('Removed the npm global package (npm uninstall -g).');
-        } else if (result.npm === 'failed') {
-          clack.log.warn('npm uninstall failed — run `npm uninstall -g @colbymchenry/codegraph` yourself (EACCES usually means it needs sudo).');
-        }
         for (const p of result.leftovers) {
           clack.log.warn(`Could not remove ${tildify(p)} — delete it manually${process.platform === 'win32' ? ' after this window closes' : ''}.`);
         }
-        cliRemoved = result.removed.length > 0 || result.npm === 'removed';
+        cliRemoved = result.removed.length > 0;
         if (cliRemoved && process.platform === 'win32') {
           clack.log.info('If your PATH still lists a codegraph bin directory, remove that entry from your user PATH.');
         }
       } else {
-        clack.log.info('Kept the CLI. Remove it later with `codegraph uninstall` or `npm uninstall -g @colbymchenry/codegraph`.');
+        clack.log.info('Kept the CLI. Remove it later with `codegraph uninstall`.');
       }
     }
   }
