@@ -19,15 +19,11 @@ const TRIPWIRE = path.resolve(__dirname, 'fixtures/network-tripwire.cjs');
 const SPAWN_RECORDER = path.resolve(__dirname, 'fixtures/record-detached-spawns.cjs');
 
 /**
- * Switches that still turn a network feature off. Each removal ticket deletes
- * its entry: the suite passing without it proves the feature is gone from the
- * code, not just disabled.
+ * Switches that would turn a network feature off, stripped from the inherited
+ * environment (vitest itself sets CODEGRAPH_TELEMETRY=0). Telemetry (#3) and the
+ * update check (#4) are gone from the code, so the suite runs with none of them:
+ * passing here proves the features are removed, not just disabled.
  */
-const OPT_OUTS: Record<string, string> = {
-  CODEGRAPH_NO_UPDATE_CHECK: '1', // removed by #4 (update check)
-};
-
-/** Inherited switches that would hide a feature from the tripwire. */
 const INHERITED_OPT_OUTS = ['CODEGRAPH_TELEMETRY', 'DO_NOT_TRACK', 'CODEGRAPH_NO_UPDATE_CHECK', 'CODEGRAPH_TELEMETRY_ENDPOINT'];
 
 /** A command that finishes later than this was waiting on something. */
@@ -44,7 +40,6 @@ function childEnv(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
   for (const key of INHERITED_OPT_OUTS) delete env[key];
   return {
     ...env,
-    ...OPT_OUTS,
     HOME: home,
     USERPROFILE: home,
     NODE_OPTIONS: [env.NODE_OPTIONS, `--require ${JSON.stringify(TRIPWIRE)}`, `--require ${JSON.stringify(SPAWN_RECORDER)}`]
@@ -224,10 +219,12 @@ describe('network tripwire', () => {
   });
 
   // Last, after every command above (and the daemon) has run in this HOME.
-  it('leaves no telemetry identity or queue behind', async () => {
+  it('leaves no telemetry identity, telemetry queue or update-check cache behind', async () => {
     await waitForDetachedExit();
     const stateDir = path.join(home, '.codegraph');
-    const telemetryFiles = fs.existsSync(stateDir) ? fs.readdirSync(stateDir).filter((name) => name.startsWith('telemetry')) : [];
-    expect(telemetryFiles).toEqual([]);
+    const leftovers = fs.existsSync(stateDir)
+      ? fs.readdirSync(stateDir).filter((name) => name.startsWith('telemetry') || name.startsWith('update-check'))
+      : [];
+    expect(leftovers).toEqual([]);
   });
 });
