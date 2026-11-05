@@ -26,9 +26,47 @@ git clone git@github.com:CarterChen247/codegraph-lite.git
 cd codegraph-lite
 npm ci                 # needs Node 22.12+ (< 25); the only network step, to the npm registry
 npm run build
-npm link               # puts this checkout's `codegraph` on PATH
-codegraph install      # writes each agent's MCP config: `codegraph serve --mcp`
+npm link               # optional: puts this checkout's `codegraph` on PATH for terminal use
 ```
+
+### Enable it per checkout (recommended)
+
+`scripts/codegraph-local.mjs` turns CodeGraph on for Claude Code in **one checkout at a time** (#22). That can be a repo's main checkout, a `git worktree add` worktree, or a Claude Code worktree (`.claude/worktrees/<name>/`). Every other repo stays untouched: no MCP server, no prompt hook, no per-prompt cost. Nothing it writes is ever committed.
+
+```bash
+node scripts/codegraph-local.mjs enable  <checkout>   # also re-syncs if already enabled
+node scripts/codegraph-local.mjs status  <checkout>
+node scripts/codegraph-local.mjs disable <checkout>
+```
+
+| What | Where | Committed? |
+|---|---|---|
+| Index | `<checkout>/.codegraph/` (`init --local-only`: its own `.gitignore` ignores itself too) | no |
+| MCP server | `~/.claude.json`, Claude Code **local scope**, keyed by `<checkout>`, via `claude mcp add --scope local` | no (outside the repo) |
+| Prompt hook and auto-allow `mcp__codegraph__*` | `<checkout>/.claude/settings.local.json`, merged with your existing keys | no |
+| Ignore rules for the two files above | `<git common dir>/info/exclude`, shared by every worktree, never pushed | no |
+
+`enable` then verifies its own work and fails if any check doesn't hold:
+
+- `git status` is unchanged;
+- no codegraph git hook exists in `.git/hooks` or `core.hooksPath`;
+- the index holds nothing under `.claude/worktrees/`, which is another checkout's code;
+- `claude mcp get codegraph` finds the server.
+
+More details:
+
+- **Pinned to this build.** The MCP command and the hook call this build by absolute path, `<node on PATH> <checkout of this repo>/dist/bin/codegraph.js`. No other `codegraph` on PATH, including the official package, can stand in for it, and `npm link` isn't required.
+- **Worktrees.** Each worktree gets its own index, so it never reads the main checkout's index of another branch. After creating a worktree, run `enable` on it. There are no git hooks, so nothing does this automatically.
+- **No instructions block.** Nothing is written to `CLAUDE.md`, because the MCP server's `initialize` instructions already tell the agent how to use the tools.
+- **Claude Code only.** Codex's project config would live inside the repo.
+- **Tested** on a scratch repo with a main checkout, a sibling `git worktree add` worktree and a nested `.claude/worktrees/feat`, with a sandboxed HOME and the network denied:
+  - the MCP entry was visible in those three paths and in no other repo;
+  - each worktree's hook injected symbols from its own branch;
+  - a pre-existing `settings.local.json` key survived `enable` and `disable`;
+  - re-running `enable` added nothing;
+  - `disable` left no MCP entry, hook, permission or `.codegraph/`.
+
+`codegraph install` (upstream's installer) still works. It configures agents globally (or `--location local`, which writes the shared `.claude/settings.json` and `.mcp.json` into the repo), so prefer the script above.
 
 **How `npm link` works:** it creates two links and copies nothing: `<npm prefix>/lib/node_modules/@carterchen247/codegraph-lite` points at this checkout, and `<npm prefix>/bin/codegraph` points at its `dist/bin/codegraph.js`. Every terminal, and every agent's MCP entry, then runs this build. To remove it, run `npm unlink -g` in the checkout.
 
@@ -38,7 +76,7 @@ codegraph install      # writes each agent's MCP config: `codegraph serve --mcp`
 git pull && npm ci && npm run build
 ```
 
-Then restart open agent sessions so their MCP servers load the new build.
+Then restart open agent sessions so their MCP servers load the new build. Run `codegraph-local.mjs enable` again on a checkout to re-sync its index.
 
 ## Every network point, and what happened to it
 
