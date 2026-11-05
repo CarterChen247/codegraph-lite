@@ -1,5 +1,5 @@
 {
-  "name": "@colbymchenry/codegraph",
+  "name": "@carterchen247/codegraph-lite",
   "version": "1.6.2",
   "description": "Supercharge AI coding agents with semantic code intelligence — surgical context, fewer tool calls, faster answers. 100% local.",
   "repository": {

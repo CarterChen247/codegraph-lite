@@ -10,7 +10,16 @@ Spec: issue #1. Work: #2–#9, one PR each.
 
 ## Install
 
-This build is only ever built from source. Don't install `@colbymchenry/codegraph` from npm: that is the upstream build, with telemetry. If it's on PATH, it shadows this one.
+This build is only ever built from source. The upstream package `@colbymchenry/codegraph` on npm is the upstream build, with telemetry.
+
+The fork has its own package name, `@carterchen247/codegraph-lite` (#18), and keeps the same `codegraph` bin. A shared name would let npm treat the official package as an update of this one. That was verified in an isolated npm prefix:
+
+| After `npm link` of this checkout | Shared name (before #18) | Own name |
+|---|---|---|
+| `npm install -g @colbymchenry/codegraph` | exit 0, `changed 1 package`: the link is **silently replaced** by upstream | exit 1, `EEXIST: file already exists …/bin/codegraph`: **refused**, this build stays |
+| `npm update -g` | n/a | `up to date`: the link stays (the name isn't on the registry) |
+
+Only `--force` would let the official package overwrite the `codegraph` bin. Don't use it.
 
 ```bash
 git clone git@github.com:CarterChen247/codegraph-lite.git
@@ -21,7 +30,7 @@ npm link               # puts this checkout's `codegraph` on PATH
 codegraph install      # writes each agent's MCP config: `codegraph serve --mcp`
 ```
 
-**How `npm link` works:** it creates a link in npm's global bin directory pointing at this checkout's `dist/bin/codegraph.js`. Every terminal, and every agent's MCP entry, then runs this build. To remove it, run `npm unlink -g` in the checkout.
+**How `npm link` works:** it creates two links and copies nothing: `<npm prefix>/lib/node_modules/@carterchen247/codegraph-lite` points at this checkout, and `<npm prefix>/bin/codegraph` points at its `dist/bin/codegraph.js`. Every terminal, and every agent's MCP entry, then runs this build. To remove it, run `npm unlink -g` in the checkout.
 
 **To update**, which is also what `codegraph upgrade` prints:
 
@@ -138,7 +147,7 @@ OFFLINE CHECK PASSED
 
 ## After every upstream sync
 
-1. **Resolve conflicts in this fork's favour** in these files:
+1. **Resolve conflicts in this fork's favour** in these files (and keep `"name": "@carterchen247/codegraph-lite"` in `package.json` / `package-lock.json`):
    - `src/telemetry/index.ts`
    - `src/upgrade/update-check.ts`
    - `src/upgrade/index.ts`

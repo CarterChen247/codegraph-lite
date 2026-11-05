@@ -92,7 +92,8 @@ async function loadCodeGraph(): Promise<typeof import('../index')> {
     console.error(`${red}${getGlyphs().err}${reset} Failed to load CodeGraph modules.`);
     console.error(`\n  Node: ${process.version}  Platform: ${process.platform} ${process.arch}`);
     console.error(`\n  Error: ${msg}`);
-    console.error('\n  Try reinstalling with: npm install -g @colbymchenry/codegraph\n');
+    // Privacy hardening (#18): never point at the official npm package.
+    console.error('\n  Try rebuilding this checkout: npm ci && npm run build\n');
     process.exit(1);
   }
 }
