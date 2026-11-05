@@ -3098,9 +3098,10 @@ program
   .command('install')
   .description('Install codegraph MCP server into one or more agents (Claude Code, Cursor, Codex CLI, opencode, Hermes Agent, Gemini CLI, Antigravity IDE, Kiro, GitHub Copilot, IBM Bob, Factory Droid, Windsurf, Qwen Code, DeepSeek Harness, Grok Build, Kimi Code, Qoder CLI, Pi)')
   .option('-t, --target <ids>', 'Target agent(s): comma-separated ids, or "auto"|"all"|"none". Default: prompt')
-  .option('-l, --location <where>', 'Install location: "global", "local", or "private" (Claude Code only: this checkout, just for you, nothing committed). Default: prompt')
+  .option('-l, --location <where>', 'Install location: "global", "local", or "private" (Claude Code only: this checkout, just for you, nothing committed; builds or syncs the index). Default: prompt')
   .option('-y, --yes', 'Non-interactive: defaults to --location=global --target=auto, auto-allow on')
-  .option('-i, --init', 'After wiring agents, also run `codegraph init` in the current directory — builds this project’s index, so install + index is one command (combine with --yes for an unattended bootstrap)')
+  .option('-i, --init', 'After wiring agents, also run `codegraph init` in the current directory — builds this project’s index, so install + index is one command (combine with --yes for an unattended bootstrap). On by default with --location private')
+  .option('--no-init', 'With --location private: write the setup only, without building or syncing the index')
   .option('--no-permissions', 'Skip writing the auto-allow permissions list (Claude Code and Qwen Code only)')
   .option('--print-config <id>', 'Print MCP config snippet for the named agent and exit (no file writes)')
   .option('--refresh', 'Rewrite what previous installs configured, for already-configured agents only (never adds new ones). Run automatically by `codegraph upgrade`')
@@ -3129,9 +3130,24 @@ program
       try {
         const result = installPrivate(process.cwd(), { autoAllow: opts.permissions !== false });
         for (const step of result.steps) success(step);
-        if (opts.init) {
-          await runInit(result.checkout.dir, { yes: true, localOnly: true });
-          if (process.exitCode) process.exit(process.exitCode);
+        // A private install is useless without an index, so it builds one unless
+        // told not to (#26), and a re-run refreshes it.
+        if (opts.init !== false) {
+          const dir = result.checkout.dir;
+          if (isInitialized(dir)) {
+            const { default: CodeGraph } = await loadCodeGraph();
+            const cg = await CodeGraph.open(dir);
+            try {
+              const synced = await cg.sync();
+              const changed = synced.filesAdded + synced.filesModified + synced.filesRemoved;
+              success(changed > 0 ? `Index synced: ${formatNumber(changed)} changed files` : 'Index already up to date');
+            } finally {
+              cg.destroy();
+            }
+          } else {
+            await runInit(dir, { yes: true, localOnly: true });
+            if (process.exitCode) process.exit(process.exitCode);
+          }
         }
         const problems = verifyPrivate(result.checkout, result.before);
         if (problems.length > 0) {
@@ -3139,8 +3155,8 @@ program
           process.exit(1);
         }
         success('Verified: git status unchanged, no git hooks, no nested worktree in the index, MCP server visible here.');
-        if (!opts.init && !fs.existsSync(path.join(result.checkout.dir, '.codegraph'))) {
-          console.log('Next: run `codegraph init --local-only` here (or re-run with --init) to build this checkout\'s index.');
+        if (opts.init === false && !fs.existsSync(path.join(result.checkout.dir, '.codegraph'))) {
+          console.log('Next: run `codegraph init --local-only` here (or re-run without --no-init) to build this checkout\'s index.');
         }
         console.log('Restart Claude Code in this directory to pick it up.');
       } catch (err) {

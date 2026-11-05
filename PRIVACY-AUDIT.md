@@ -6,7 +6,7 @@ Everything local still works: indexing, sync, every query command, the MCP serve
 
 Two tests keep it that way across upstream syncs, and a script proves it on a machine with no network. See [Verification](#verification).
 
-Spec: issue #1. Work: #2–#9, one PR each.
+Spec: issue #1. Work: #2–#9, then #18, #20, #24, #26, one PR each. Teammates start from [`docs/ONBOARDING.md`](docs/ONBOARDING.md).
 
 ## Install
 
@@ -39,8 +39,8 @@ Run this at the root of each checkout you want CodeGraph in (#24). A checkout ca
 
 ```bash
 cd <checkout>
-codegraph install --location private --init    # enable; re-run any time
-codegraph uninstall --location private         # disable (the index stays; `codegraph uninit` deletes it)
+codegraph install -l private      # enable: setup + index; a re-run syncs the index
+codegraph uninstall -l private    # disable (the index stays; `codegraph uninit` deletes it)
 ```
 
 Every other repo stays untouched: no MCP server, no prompt hook, and no cost per prompt. Nothing it writes is committed. This is Claude Code's own **local scope**: this project, and only you.
@@ -50,7 +50,7 @@ Every other repo stays untouched: no MCP server, no prompt hook, and no cost per
 | Ignore rules (written first) | `<git common dir>/info/exclude`, shared by every worktree, never pushed | no |
 | MCP server | `~/.claude.json`, keyed by the checkout's path, written by the official `claude mcp add --scope local` (run with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`) | no (outside the repo) |
 | Prompt hook, plus auto-allow `mcp__codegraph__*` (`--no-permissions` skips auto-allow) | `<checkout>/.claude/settings.local.json`, merged with your existing keys | no |
-| Index (`--init`) | `<checkout>/.codegraph/`, built with `init --local-only`, so its own `.gitignore` ignores it too | no |
+| Index (default; `--no-init` skips it, #26) | `<checkout>/.codegraph/`, built with `init --local-only`, so its own `.gitignore` ignores it too. A re-run syncs it | no |
 
 The install then verifies the result and fails if any of these doesn't hold:
 

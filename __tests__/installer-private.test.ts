@@ -121,7 +121,7 @@ describe('codegraph install --location private', () => {
 
   it('enables the main checkout: ignore rules, local-scope MCP, merged hook + auto-allow, its own index', () => {
     const before = status(main);
-    const r = install(main, '--init');
+    const r = install(main);
     expect(r.status, r.out).toBe(0);
     expect(r.out).toMatch(/Verified: git status unchanged/);
 
@@ -148,7 +148,7 @@ describe('codegraph install --location private', () => {
 
   it('gives each worktree its own entry and index, and keeps the nested one out of the main index', () => {
     for (const dir of [sibling, nested]) {
-      const r = install(dir, '--init');
+      const r = install(dir);
       expect(r.status, r.out).toBe(0);
       expect(fs.existsSync(path.join(dir, '.codegraph', 'codegraph.db'))).toBe(true);
       expect(settingsOf(dir).hooks.UserPromptSubmit).toHaveLength(1);
@@ -160,8 +160,11 @@ describe('codegraph install --location private', () => {
     expect(install(main).out).toMatch(/Verified/);
   });
 
-  it('is idempotent: a re-run adds no second hook, permission, exclude block or entry', () => {
-    const r = install(main, '--init');
+  it('is idempotent: a re-run syncs the index and adds no second hook, permission, exclude block or entry', () => {
+    fs.writeFileSync(path.join(main, 'src', 'extra.ts'), 'export function extra(): number {\n  return 2;\n}\n');
+    const r = install(main);
+    expect(r.out).toMatch(/Index synced: 1 changed files/);
+    expect(install(main).out).toMatch(/Index already up to date/);
     expect(r.status, r.out).toBe(0);
     const settings = settingsOf(main);
     expect(settings.hooks.UserPromptSubmit).toHaveLength(1);
@@ -201,6 +204,28 @@ describe('codegraph uninstall --location private', () => {
     expect(registered()[sibling]).toBeUndefined();
     // The nested worktree is untouched by the others' uninstalls.
     expect(registered()[nested]).toBeDefined();
+  });
+
+  it('--no-init writes the setup but builds no index', () => {
+    const fresh = path.join(root, 'fresh');
+    fs.mkdirSync(path.join(fresh, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(fresh, 'src', 'a.ts'), 'export const a = 1;\n');
+    git(fresh, 'init', '-q');
+    const r = install(fresh, '--no-init');
+    expect(r.status, r.out).toBe(0);
+    expect(fs.existsSync(path.join(fresh, '.codegraph'))).toBe(false);
+    expect(r.out).toMatch(/re-run without --no-init/);
+    expect(settingsOf(fresh).hooks.UserPromptSubmit).toHaveLength(1);
+  });
+
+  it('global and local installs still index only with an explicit --init', () => {
+    const other = path.join(root, 'other');
+    fs.mkdirSync(path.join(other, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(other, 'src', 'b.ts'), 'export const b = 1;\n');
+    git(other, 'init', '-q');
+    const r = cli(other, ['install', '--location', 'local', '--target', 'claude', '--yes']);
+    expect(r.status, r.out).toBe(0);
+    expect(fs.existsSync(path.join(other, '.codegraph'))).toBe(false);
   });
 
   it('install without --permissions writes the hook but no auto-allow', () => {
