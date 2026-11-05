@@ -21,8 +21,10 @@ The fork has its own package name, `@carterchen247/codegraph-lite` (#18), and ke
 
 Only `--force` would let the official package overwrite the `codegraph` bin. Don't use it.
 
+Reviewed releases are tagged `v<upstream version>-lite.<n>`. The first is `v1.6.2-lite.1`, on upstream 1.6.2. Install a tag rather than `main`, and tag again after an upstream sync passes the checklist below.
+
 ```bash
-git clone git@github.com:CarterChen247/codegraph-lite.git
+git clone --branch v1.6.2-lite.1 git@github.com:CarterChen247/codegraph-lite.git
 cd codegraph-lite
 npm ci                 # needs Node 22.12+ (< 25); the only network step, to the npm registry
 npm run build
@@ -77,11 +79,13 @@ Prefer `private` unless you mean to share the setup.
 
 **How `npm link` works:** it creates two links and copies nothing: `<npm prefix>/lib/node_modules/@carterchen247/codegraph-lite` points at this checkout, and `<npm prefix>/bin/codegraph` points at its `dist/bin/codegraph.js`. Every terminal, and every agent's MCP entry, then runs this build. To remove it, run `npm unlink -g` in the checkout.
 
-**To update**, which is also what `codegraph upgrade` prints:
+**To update** to a newer reviewed release:
 
 ```bash
-git pull && npm ci && npm run build
+git fetch --tags && git checkout <new tag> && npm ci && npm run build
 ```
+
+`codegraph upgrade` prints the `main` form of this (`git pull && npm ci && npm run build`), which is for whoever maintains the fork.
 
 Then restart open agent sessions so their MCP servers load the new build. Checkouts enabled with `--location private` need nothing else: their commands point at this build by path.
 
@@ -212,3 +216,4 @@ OFFLINE CHECK PASSED
 4. **Run the offline check:** `bash docs/privacy/offline-check.sh` must print `OFFLINE CHECK PASSED`.
 5. **Look for new automatic behaviour:** grep the new upstream `CHANGELOG.md` entries and any new `src/` files for telemetry, update, analytics, waitlist or upload features, in case something reaches the network in a shape the scan doesn't know. Add any you find to the table above.
 6. **Update this file** in the same change.
+7. **Tag the reviewed result** as `v<upstream version>-lite.<n>`, so teammates move to it with `git checkout <tag>`.

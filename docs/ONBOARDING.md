@@ -17,14 +17,16 @@ This guide covers how to install CodeGraph on your machine, turn it on for the r
 ## 2. Install CodeGraph (once per machine)
 
 ```bash
-git clone https://github.com/CarterChen247/codegraph-lite.git ~/Documents/Github/codegraph-lite
+git clone --branch v1.6.2-lite.1 https://github.com/CarterChen247/codegraph-lite.git ~/Documents/Github/codegraph-lite
 cd ~/Documents/Github/codegraph-lite
 npm ci && npm run build && npm link
 ```
 
 - **Network:** `npm ci` is the only step that uses the network. It downloads dependencies from the npm registry. If your network blocks the registry, ask for access to it.
 - **What `npm link` does:** it puts this build's `codegraph` on your PATH. It is safe to run. If you later run `npm install -g @colbymchenry/codegraph` by mistake, it fails with `EEXIST` instead of replacing this build. Don't add `--force`.
-- **Pick a reviewed version:** if your team has agreed on one, check it out before building, for example `git checkout <tag>`.
+- **The reviewed version:** `--branch v1.6.2-lite.1` checks out a reviewed release instead of `main`. Git will say you are in "detached HEAD", which is expected.
+  - **Tag names:** `v<upstream version>-lite.<n>`. The latest is in the repo's tags: `git tag --sort=-creatordate | head -1`.
+  - **Agreed version:** if your team has agreed on a different tag, use that one instead.
 
 ## 3. Turn it on in a repo (once per repo or worktree)
 
@@ -78,7 +80,7 @@ CodeGraph helps most with questions about how the code fits together:
 |---|---|
 | You changed code | Nothing. While Claude Code is open, the index follows your edits. To refresh it right now, run `codegraph install -l private` again |
 | A new worktree | `cd <worktree> && codegraph install -l private` |
-| Update CodeGraph | `cd ~/Documents/Github/codegraph-lite && git pull && npm ci && npm run build`, then restart Claude Code. Enabled repos need nothing else |
+| Update CodeGraph to a newer reviewed release | `cd ~/Documents/Github/codegraph-lite && git fetch --tags && git checkout <new tag> && npm ci && npm run build`, then restart Claude Code. Enabled repos need nothing else |
 | You moved the `codegraph-lite` folder | Run `codegraph install -l private` again in each enabled repo. The setup points at the build by its full path |
 | Stop using it in a repo | `codegraph uninstall -l private`. Add `codegraph uninit` to delete the index too |
 
