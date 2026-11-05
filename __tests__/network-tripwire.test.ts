@@ -57,15 +57,16 @@ function recordedAttempts(): Array<{ pid: number; kind: string; target: string }
   return raw.split('\n').filter(Boolean).map((line) => JSON.parse(line));
 }
 
-function runCli(args: string[]): { status: number | null; ms: number; output: string } {
+function runCli(args: string[], input?: string): { status: number | null; ms: number; output: string; stdout: string } {
   const started = Date.now();
   const result = spawnSync(process.execPath, [...WASM_RUNTIME_FLAGS, BIN, ...args], {
     cwd: project,
     env: childEnv(),
     encoding: 'utf8',
     timeout: 60_000,
+    input,
   });
-  return { status: result.status, ms: Date.now() - started, output: `${result.stdout}\n${result.stderr}` };
+  return { status: result.status, ms: Date.now() - started, output: `${result.stdout}\n${result.stderr}`, stdout: result.stdout };
 }
 
 function isAlive(pid: number): boolean {
@@ -104,6 +105,11 @@ beforeAll(() => {
   fs.writeFileSync(
     path.join(project, 'src', 'main.ts'),
     "import { twice } from './math';\n\nexport function main(): void {\n  console.log(twice(21));\n}\n",
+  );
+  // A compound name, so prose like "order total" reaches the prompt hook's medium tier.
+  fs.writeFileSync(
+    path.join(project, 'src', 'format.ts'),
+    'export function formatOrderTotal(cents: number): string {\n  return (cents / 100).toFixed(2);\n}\n',
   );
   spawnSync('git', ['init', '-q'], { cwd: project });
 });
@@ -161,6 +167,19 @@ describe('network tripwire', () => {
       expect({ args, status }).toEqual({ args, status: 0 });
       expect(output).toMatch(/Telemetry is removed in this build/);
     }
+    expect(recordedAttempts()).toEqual([]);
+  });
+
+  // Claude Code runs the prompt hook on every prompt the user sends, with the prompt text.
+  it.each([
+    ['high (structural keyword → explore injected)', 'trace the flow from main to add', /<codegraph_context note="Structural context[\s\S]*\btwice\b/],
+    ['medium (prose matches symbol segments → symbol list)', 'the order total formatting looks off', /<codegraph_context[\s\S]*formatOrderTotal/],
+    ['silent (nothing to inject)', 'fix the typo in the readme', /^\s*$/],
+  ])('codegraph prompt-hook, %s, makes no outbound attempt', (_tier, prompt, expected) => {
+    const { status, ms, stdout } = runCli(['prompt-hook'], JSON.stringify({ prompt, cwd: project }));
+    expect(status).toBe(0);
+    expect(ms, `prompt-hook took ${ms} ms`).toBeLessThan(COMMAND_BUDGET_MS);
+    expect(stdout).toMatch(expected);
     expect(recordedAttempts()).toEqual([]);
   });
 

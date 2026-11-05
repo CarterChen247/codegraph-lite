@@ -80,6 +80,27 @@ upgrade --check
 upgrade
 CMDS
 
+# The Claude Code prompt hook: it reads every prompt the user sends. A structural
+# prompt must get context injected; a plain one must get nothing.
+for prompt in "how does main work" "fix the typo in the readme"; do
+  t0=$(now)
+  set +e
+  printf '{"prompt":"%s","cwd":"%s"}' "$prompt" "$WORK/proj" \
+    | sandbox-exec -f "$WORK/offline.sb" node "$BIN" prompt-hook >"$WORK/out.txt" 2>"$WORK/err.txt"
+  code=$?
+  set -e
+  ms=$(( $(now) - t0 ))
+  injected=$(grep -c '<codegraph_context' "$WORK/out.txt" || true)
+  printf '  %-48s exit=%s %6s ms  injected=%s\n' "prompt-hook: \"$prompt\"" "$code" "$ms" "$injected"
+  [ "$code" -eq 0 ] || fail "prompt-hook exit $code"
+  [ "$ms" -lt $((BUDGET_S * 1000)) ] || fail "prompt-hook took ${ms} ms"
+  if grep -qiE "$NET_ERRORS" "$WORK/out.txt" "$WORK/err.txt"; then fail "prompt-hook network error"; fi
+  case "$prompt" in
+    how*) [ "$injected" -ge 1 ] || fail "structural prompt got no context" ;;
+    *)    [ "$injected" -eq 0 ] || fail "plain prompt got context" ;;
+  esac
+done
+
 # One MCP session in daemon mode (the default): initialize, a tool call, status.
 cat >"$WORK/drive-mcp.cjs" <<'JS'
 const { spawn } = require('child_process');

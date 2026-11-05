@@ -93,7 +93,7 @@ Out of scope: dev dependencies, and `npm ci`'s own traffic to the npm registry.
 
 | Check | What it proves | Where |
 |---|---|---|
-| **Network tripwire** (runtime) | The built CLI makes zero outbound attempts. Every process it starts preloads a tripwire through `NODE_OPTIONS`; that includes the CLI's re-exec, the MCP daemon and worker threads. The tripwire records, then fails, any `fetch`, `net`/`tls`/`http(s)` connect or DNS lookup that isn't loopback, and any spawn of curl, wget, npm or PowerShell. Commands run: `init`, `index`, `query`, `explore`, `telemetry`, `upgrade`, and `serve --mcp` in-process and in daemon mode. Then it checks that no telemetry or update-check file exists. No opt-out env var is set, and the inherited ones are stripped | `__tests__/network-tripwire.test.ts` (#2–#5) |
+| **Network tripwire** (runtime) | The built CLI makes zero outbound attempts. Every process it starts preloads a tripwire through `NODE_OPTIONS`; that includes the CLI's re-exec, the MCP daemon and worker threads. The tripwire records, then fails, any `fetch`, `net`/`tls`/`http(s)` connect or DNS lookup that isn't loopback, and any spawn of curl, wget, npm or PowerShell. Commands run: `init`, `index`, `query`, `explore`, `telemetry`, `upgrade`, `prompt-hook` (one prompt per gate tier: explore injected, symbol list injected, nothing injected; #20), and `serve --mcp` in-process and in daemon mode. Then it checks that no telemetry or update-check file exists. No opt-out env var is set, and the inherited ones are stripped | `__tests__/network-tripwire.test.ts` (#2–#5) |
 | **Static scan** (source) | `src/` and `ui/src/` contain no network import, request call or network-program spawn outside a 7-entry allowlist. Each entry has a reason. A stale entry fails too. This catches network code an upstream sync adds that nothing runs yet | `__tests__/network-static-scan.test.ts` (#7) |
 | **Offline check** (whole system) | Everything works with the network denied at the OS level, with no errors, no hangs and no state left behind | `docs/privacy/offline-check.sh` (#9, macOS) |
 
@@ -123,6 +123,8 @@ Two sandboxes were used:
   codegraph telemetry on                           exit=0    135 ms
   codegraph upgrade --check                        exit=0    139 ms
   codegraph upgrade                                exit=0    136 ms
+  prompt-hook: "how does main work"                exit=0    247 ms  injected=1
+  prompt-hook: "fix the typo in the readme"        exit=0    151 ms  injected=0
   serve --mcp: initialize                          85 ms
   serve --mcp: codegraph_explore                   295 ms
   serve --mcp: codegraph_status                    125 ms
@@ -135,6 +137,7 @@ OFFLINE CHECK PASSED
 
 - **No hangs:** no command waited on a network timeout. Indexing 360 files took under 4 s.
 - **Real answers:** `query`, `callers` and `explore` returned real results. `explore` returned about 19 KB of source and call paths.
+- **Prompt hook:** Claude Code runs `codegraph prompt-hook` on every prompt the user sends, with the prompt text. With the network denied, it injected context for the structural prompt and nothing for the plain one (#20).
 - **MCP server:** `initialize` and `codegraph_status` carried no update notice. The daemon exited on its idle timeout, and its log has no network errors.
 - **Viewer:** it listened on `127.0.0.1` only and sent its CSP.
 
