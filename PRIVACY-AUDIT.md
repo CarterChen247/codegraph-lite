@@ -6,7 +6,7 @@ Everything local still works: indexing, sync, every query command, the MCP serve
 
 Two tests keep it that way across upstream syncs, and a script proves it on a machine with no network. See [Verification](#verification).
 
-Spec: issue #1. Work: #2–#9, then #18, #20, #24, #26, one PR each. Teammates start from [`docs/ONBOARDING.md`](docs/ONBOARDING.md).
+Spec: issue #1. Work: #2–#9, then #18, #20, #24, #26, one PR each. Teammates start from [`docs/ONBOARDING.md`](docs/ONBOARDING.md). Why it is built this way: [ADR-0001](docs/adr/0001-remove-network-features-not-disable.md) (remove, don't disable), [ADR-0002](docs/adr/0002-own-npm-package-name.md) (own package name), [ADR-0003](docs/adr/0003-install-location-private.md) (`--location private`).
 
 ## Install
 
