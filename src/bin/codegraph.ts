@@ -3098,7 +3098,7 @@ program
   .command('install')
   .description('Install codegraph MCP server into one or more agents (Claude Code, Cursor, Codex CLI, opencode, Hermes Agent, Gemini CLI, Antigravity IDE, Kiro, GitHub Copilot, IBM Bob, Factory Droid, Windsurf, Qwen Code, DeepSeek Harness, Grok Build, Kimi Code, Qoder CLI, Pi)')
   .option('-t, --target <ids>', 'Target agent(s): comma-separated ids, or "auto"|"all"|"none". Default: prompt')
-  .option('-l, --location <where>', 'Install location: "global" or "local". Default: prompt')
+  .option('-l, --location <where>', 'Install location: "global", "local", or "private" (Claude Code only: this checkout, just for you, nothing committed). Default: prompt')
   .option('-y, --yes', 'Non-interactive: defaults to --location=global --target=auto, auto-allow on')
   .option('-i, --init', 'After wiring agents, also run `codegraph init` in the current directory — builds this project’s index, so install + index is one command (combine with --yes for an unattended bootstrap)')
   .option('--no-permissions', 'Skip writing the auto-allow permissions list (Claude Code and Qwen Code only)')
@@ -3113,6 +3113,43 @@ program
     printConfig?: string;
     refresh?: boolean;
   }) => {
+    // --location private (#24): Claude Code's local scope for THIS checkout. It
+    // is not an agent-target Location (every target reads "not global" as the
+    // repo's shared files), so it is handled here, before anything else runs.
+    if (opts.location === 'private') {
+      if (opts.printConfig || opts.refresh) {
+        error('--location private does not combine with --print-config or --refresh.');
+        process.exit(1);
+      }
+      if (opts.target && opts.target !== 'claude') {
+        error(`--location private supports Claude Code only (--target claude), not "${opts.target}".`);
+        process.exit(1);
+      }
+      const { installPrivate, verifyPrivate } = await import('../installer/private-claude');
+      try {
+        const result = installPrivate(process.cwd(), { autoAllow: opts.permissions !== false });
+        for (const step of result.steps) success(step);
+        if (opts.init) {
+          await runInit(result.checkout.dir, { yes: true, localOnly: true });
+          if (process.exitCode) process.exit(process.exitCode);
+        }
+        const problems = verifyPrivate(result.checkout, result.before);
+        if (problems.length > 0) {
+          error(`Installed, but verification failed:\n  - ${problems.join('\n  - ')}`);
+          process.exit(1);
+        }
+        success('Verified: git status unchanged, no git hooks, no nested worktree in the index, MCP server visible here.');
+        if (!opts.init && !fs.existsSync(path.join(result.checkout.dir, '.codegraph'))) {
+          console.log('Next: run `codegraph init --local-only` here (or re-run with --init) to build this checkout\'s index.');
+        }
+        console.log('Restart Claude Code in this directory to pick it up.');
+      } catch (err) {
+        error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+      return;
+    }
+
     if (opts.printConfig) {
       const { getTarget, listTargetIds } = await import('../installer/targets/registry');
       const target = getTarget(opts.printConfig);
@@ -3220,7 +3257,7 @@ program
   .command('uninstall')
   .description('Remove codegraph from your agents (Claude Code, Cursor, Codex CLI, opencode, Hermes Agent, Gemini CLI, Antigravity IDE, Kiro, GitHub Copilot, IBM Bob, Factory Droid, Windsurf, Qwen Code, DeepSeek Harness, Grok Build, Kimi Code, Qoder CLI, Pi)')
   .option('-t, --target <ids>', 'Target agent(s): comma-separated ids, or "all". Default: all')
-  .option('-l, --location <where>', 'Uninstall location: "global" or "local". Default: prompt')
+  .option('-l, --location <where>', 'Uninstall location: "global", "local", or "private" (this checkout\'s Claude Code local scope). Default: prompt')
   .option('-y, --yes', 'Non-interactive: defaults to --location=global --target=all')
   .option('--keep-cli', 'Remove agent configs only — leave the codegraph CLI installed')
   .action(async (opts: {
@@ -3229,6 +3266,26 @@ program
     yes?: boolean;
     keepCli?: boolean;
   }) => {
+    if (opts.location === 'private') {
+      if (opts.target && opts.target !== 'claude') {
+        error(`--location private supports Claude Code only (--target claude), not "${opts.target}".`);
+        process.exit(1);
+      }
+      const { uninstallPrivate } = await import('../installer/private-claude');
+      try {
+        const result = uninstallPrivate(process.cwd());
+        for (const step of result.steps) success(step);
+        if (result.left.length > 0) {
+          error(`Uninstall incomplete: ${result.left.join('; ')}.`);
+          process.exit(1);
+        }
+        console.log('The index (.codegraph/) is kept; `codegraph uninit` deletes it.');
+      } catch (err) {
+        error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+      return;
+    }
     const { runUninstaller } = await import('../installer');
     if (opts.location && opts.location !== 'global' && opts.location !== 'local') {
       error(`--location must be "global" or "local" (got "${opts.location}").`);

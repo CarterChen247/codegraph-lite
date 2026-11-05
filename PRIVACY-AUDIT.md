@@ -27,8 +27,53 @@ cd codegraph-lite
 npm ci                 # needs Node 22.12+ (< 25); the only network step, to the npm registry
 npm run build
 npm link               # puts this checkout's `codegraph` on PATH
-codegraph install      # writes each agent's MCP config: `codegraph serve --mcp`
 ```
+
+### Enable it per checkout: `codegraph install --location private` (recommended)
+
+Run this at the root of each checkout you want CodeGraph in (#24). A checkout can be:
+
+- a repo's main checkout;
+- a `git worktree add` worktree;
+- a Claude Code worktree (`.claude/worktrees/<name>/`).
+
+```bash
+cd <checkout>
+codegraph install --location private --init    # enable; re-run any time
+codegraph uninstall --location private         # disable (the index stays; `codegraph uninit` deletes it)
+```
+
+Every other repo stays untouched: no MCP server, no prompt hook, and no cost per prompt. Nothing it writes is committed. This is Claude Code's own **local scope**: this project, and only you.
+
+| What | Where | Committed? |
+|---|---|---|
+| Ignore rules (written first) | `<git common dir>/info/exclude`, shared by every worktree, never pushed | no |
+| MCP server | `~/.claude.json`, keyed by the checkout's path, written by the official `claude mcp add --scope local` (run with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`) | no (outside the repo) |
+| Prompt hook, plus auto-allow `mcp__codegraph__*` (`--no-permissions` skips auto-allow) | `<checkout>/.claude/settings.local.json`, merged with your existing keys | no |
+| Index (`--init`) | `<checkout>/.codegraph/`, built with `init --local-only`, so its own `.gitignore` ignores it too | no |
+
+The install then verifies the result and fails if any of these doesn't hold:
+
+- `git status` is unchanged;
+- there is no codegraph git hook in `.git/hooks` or `core.hooksPath`;
+- the index holds nothing under `.claude/worktrees/`, which is another checkout's code;
+- `claude mcp get codegraph` finds the server.
+
+How it behaves:
+
+- **Pinned to this build.** The MCP command and the hook call it by absolute path, `<node on PATH> <this repo>/dist/bin/codegraph.js`. No other `codegraph` on PATH can stand in for it, including the official package.
+- **Worktrees.** Each worktree gets its own index, so it never reads the main checkout's index of another branch. Run the install in a new worktree after creating it. Nothing does that automatically: there are no git hooks.
+- **Claude Code only.** Other `--target`s are refused, because Codex's project config would live inside the repo.
+- **No `CLAUDE.md` block.** The MCP server's `initialize` instructions already guide the agent.
+- **Needs `claude` on PATH.** Without it, the install refuses before writing anything.
+- **Not a `Location`.** It is not an agent-target location. Every target treats "not global" as `local`, the repo's shared files, so `private` is routed before any target runs.
+
+The other locations still exist:
+
+- `codegraph install --location local` writes the repo's **shared** `.mcp.json` and `.claude/settings.json`. Those can be committed, and if the repo already tracks them, it edits tracked files.
+- `codegraph install` (global) puts the hook in every repo.
+
+Prefer `private` unless you mean to share the setup.
 
 **How `npm link` works:** it creates two links and copies nothing: `<npm prefix>/lib/node_modules/@carterchen247/codegraph-lite` points at this checkout, and `<npm prefix>/bin/codegraph` points at its `dist/bin/codegraph.js`. Every terminal, and every agent's MCP entry, then runs this build. To remove it, run `npm unlink -g` in the checkout.
 
@@ -38,7 +83,7 @@ codegraph install      # writes each agent's MCP config: `codegraph serve --mcp`
 git pull && npm ci && npm run build
 ```
 
-Then restart open agent sessions so their MCP servers load the new build.
+Then restart open agent sessions so their MCP servers load the new build. Checkouts enabled with `--location private` need nothing else: their commands point at this build by path.
 
 ## Every network point, and what happened to it
 
